@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+pydantic
+sqlalchemy
+pydantic[email]
+alembic
+redis
+httpx
+python-multipart
+langchain
+langchain-core
+langgraph
+langchain-community
+langchain-google-genai
