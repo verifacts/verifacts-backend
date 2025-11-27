@@ -23,6 +23,7 @@ async def analyze_content(request: AnalysisRequest) -> AnalysisResponse:
             "errors": [],
             "verification_results": [],
             "extracted_claims": [],
+            "agent_reports": [],
         }
         logger.info(f"Starting analysis for URL: {request.url}")
         
@@ -38,16 +39,23 @@ async def analyze_content(request: AnalysisRequest) -> AnalysisResponse:
             claims_verified=final_state.get("claims_verified", 0),
             claims_sourced=final_state.get("claims_sourced", 0)
         )
+        
+        agent_reports = final_state.get("agent_reports", [])
+        formatted_reports = [
+            {
+                "agent": report.get("agent_name", "unknown"),
+                "claims": report.get("output", []),
+                "errors": report.get("errors", [])
+            }
+            for report in agent_reports
+        ]
+
         response = AnalysisResponse(
             status=final_state.get("status", "Completed"),
             verdict=verdict_data,
             details={
-                {
-                    "agent": report.get("agent_name", "unknown"),
-                    "claims": report.get("output", {}),
-                    "errors": report.get("errors", [])
-                }
-                for report in final_state.get("agent_reports", [])     
+                "reports": formatted_reports,
+                "raw_claims": final_state.get("verification_results", [])
             },
             identity=identity_data
         )
