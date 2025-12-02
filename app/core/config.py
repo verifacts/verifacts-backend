@@ -18,8 +18,8 @@ class Config(BaseSettings):
     SECRET_KEY: str = os.getenv("SECRET_KEY", "default_secret_key")
     
     GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
-    FIRECRAWL_API_KEY: Optional[str] = os.getenv("FIRECRAWL_API_KEY")
-    GOOGLE_FACTS_CHECK_API_KEY: Optional[str] = os.getenv("GOOGLE_FACTS_CHECK_API_KEY")
+    # FIRECRAWL_API_KEY: Optional[str] = os.getenv("FIRECRAWL_API_KEY")
+    GOOGLE_APIS_KEY: Optional[str] = os.getenv("GOOGLE_APIS_KEY")
     SERPER_API_KEY: Optional[str] = os.getenv("SERPER_API_KEY")
     
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
