@@ -1,6 +1,6 @@
 import logging
 from fastapi import APIRouter, HTTPException, Depends
-from app.api.v1.models import AnalysisRequest, AnalysisResponse, IdentityData, VerdictData
+from app.core.models import AnalysisRequest, AnalysisResponse, IdentityData, VerdictData
 from app.core.config import config
 
 logger = logging.getLogger(__name__)
