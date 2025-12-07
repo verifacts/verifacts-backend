@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, HttpUrl
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 
 
 class AnalysisRequest(BaseModel):
@@ -29,4 +29,18 @@ class AnalysisResponse(BaseModel):
     verdict: VerdictData = Field(..., description="Detailed verdict data.")
     identity: IdentityData = Field(..., description="Identity verification data of the source.")
     details: Dict[str, Any] = Field(..., description="Detailed agent reports and findings.")
+    
+    
+class Provenance(BaseModel):
+    source: Literal["selection", "extracted", "user_provided"] = Field(..., description="Source of the claim.")
+    url: Optional[HttpUrl] = Field(None, description="URL from which the claim was extracted, if applicable.")
+    context: Optional[str] = Field(None, description="Contextual information about the claim.")
+    
+class Claim(BaseModel):
+    claim_id: str
+    text: str = Field(..., description="The atomic factual claim statement")
+    normalized_text: Optional[str] = Field(None, description="Normalized version of the claim text.")
+    provenance: Provenance = Field(..., description="Provenance information of the claim.")
+    confidence: Optional[float] = Field(None, description="Confidence score of claim extraction (0.0 to 1.0).")
+    claim_type: Literal["factual", "opinion", "mixed", "ambiguous"] = Field(..., description="Type of the claim.")
     
