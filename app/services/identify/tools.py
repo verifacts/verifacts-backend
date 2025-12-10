@@ -4,7 +4,7 @@ import aiohttp
 import datetime
 import re 
 from typing import Optional, Dict, Any
-from firecrawl import AsyncFirecrawlApp
+from langchain_community.document_loaders.firecrawl import FireCrawlLoader
 import os
 from dotenv import load_dotenv
 
@@ -27,6 +27,7 @@ logging.basicConfig(level=logging.INFO)
 class SourceIdentifier:
     """
     A collection of tools for verifying sources URLs.
+
     """
     @staticmethod
     def extract_domain(url: str) -> str:
@@ -166,41 +167,7 @@ class SourceIdentifier:
         except Exception as e:
             logger.error(f"Error fetching SSL history for {domain}: {e}")
             return {"error": str(e), "status": "error"}
-        
-    @staticmethod
-    async def crawl_website(domain:str) -> Dict[str, Any]:
-        """
-        Uses Firecrawl to scrape information and contents from the website.
-        This is run asynchronously and in parallel to other deep checks.
-        """
-        if not config.FIRECRAWL_API_KEY:
-            logger.error("No Firecrawl API key provided.")
-            return {"error": "No Firecrawl API key provided", "status": "error"}
-        
-        app = AsyncFirecrawlApp(api_key=config.FIRECRAWL_API_KEY)
-        
-        target_url = f"http://{domain}"
-        try:
-            scrape_result = await app.crawl(
-                url=target_url, 
-                params= {"formats": ["markdown", "extract"], "extract": {"prompts": "Extract key information about the website and it's contents."}}
-                )
-            logger.info(f"Firecrawl scrape result for {domain}: {scrape_result}")
-            metadata = scrape_result.get("metadata", {})
-            
-            llm_extraction =scrape_result.get("extract", {})
-            
-            logger.info(f"Firecrawl LLM extraction for {domain}: {llm_extraction}")
-            return {
-                "site_title": metadata.get("title"),
-                "site_description": metadata.get("description"),
-                "llm_extraction": llm_extraction,
-                "status": "success"
-            }
-        except Exception as e:
-            logger.error(f"Error crawling website {domain}: {e}")
-            return {"error": str(e), "status": "error"}
-        
+
 
 # Example usage:
 async def main():
@@ -211,14 +178,12 @@ async def main():
     whois_data = await identifier.get_whois_data(domain)
     ssl_history = await identifier.get_ssl_history(domain)
     url_safety = await identifier.check_url_safety(url)
-    crawl_data = await identifier.crawl_website(domain)
     
     result = {
         "domain": domain,
         "whois_data": whois_data,
         "ssl_history": ssl_history,
-        "url_safety": url_safety,
-        "crawl_data": crawl_data
+        "url_safety": url_safety
     }
     
     print(result)
