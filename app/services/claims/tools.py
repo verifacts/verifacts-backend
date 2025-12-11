@@ -46,53 +46,62 @@ class ClaimTools:
     
     @staticmethod
     @tool("scrape_article_text")
-    def scrape_article_text(url: str) -> str:
+    async def scrape_article_text(url: str) -> str:
         """
         Extracts the main body text from an article given its URL.
         Useful when user provides a URL without specific text selection.
         """
-        try:
-            from newspaper import Article
+        # try:
+        #     from newspaper import Article
             
-            logger.info(f"Scraping article text from URL: {url}")
-            article = Article(url)
-            article.download()
-            article.parse()
+        #     logger.info(f"Scraping article text from URL: {url}")
+        #     article = Article(url)
+        #     article.download()
+        #     if article.download_state == 2:  # Downloaded
+        #         article.parse()
+        #         text = article.text or " "
+                
+        #     if text or len(text.strip()) >= 50:
+        #         logger.warning(f"No text extracted from article at URL: {url}")
+        #         return text.strip()
             
-            text = article.text
-            if not text or len(text.strip()) == 50:
-                logger.warning(f"No text extracted from article at URL: {url}")
-                return ""
+        #     logger.info("Article text seems insufficient, attempting to use Newspaper3k's NLP.")
         
-        except Exception as e:
-            logger.error(f"Error scraping article text from {url}: {str(e)}")
+        # except Exception as e:
+        #     logger.error(f"Error scraping article text from {url}: {str(e)}")
+        #     return ""
+    
+        
+        if not config.FIRECRAWL_API_KEY:
+            logger.error("FIRECRAWL_API_KEY not set. Cannot use FireCrawl for extraction.")
             return ""
         
-        if text and len(text.strip())> 50:
-            logging.info(f"Successfully extracted article text from URL: {url} using Newspaper4k")
-            return text
-        
-        if config.FIRECRAWL_API_KEY:
-            logger.info("Fallback for Newspaper4k: Using FireCrawl to extract article text.")
-            try:
-                loader = FireCrawlLoader(
-                    urls=[url],
-                    api_key=config.FIRECRAWL_API_KEY,
-                    mode="scrape",
-                    render_js=True,
-                    wait_time=2,
-                    max_retries=2
-                )
-                documents = loader.load()
-                if documents:
-                    text = "\n".join([doc.page_content for doc in documents])
-                    logger.info(f"Successfully extracted article text from URL: {url} using FireCrawl")
-                    return text
-                else:
-                    logger.warning(f"No documents returned by FireCrawl for URL: {url}")
-            except Exception as e:
-                logger.error(f"Error extracting article text from {url} using FireCrawl: {str(e)}")
+        logger.info("Fallback for Newspaper4k: Using FireCrawl to extract article text.")
+        try:
+            
+            loader = FireCrawlLoader(
+                url=url,
+                api_key=config.FIRECRAWL_API_KEY,
+                mode="scrape"
+            )
+            documents = await loader.aload()  # ← async version
+            logger.info(f"FireCrawl returned {len(documents)} documents for {url}")
+            if not documents:
+                logger.warning(f"FireCrawl returned no documents for {url}")
                 return ""
+    
+            text = "\n\n".join(doc.page_content for doc in documents if doc.page_content)
+            text = text.strip()
+            
+            
+            logger.info(f"Successfully extracted article text from URL: {url} using FireCrawl")
+            if text and len(text.strip())> 50:
+                return text
+            else:
+                logger.warning(f"No documents returned by FireCrawl for URL: {url}")
+        except Exception as e:
+            logger.error(f"Error extracting article text from {url} using FireCrawl: {str(e)}")
+            return ""
         
         else:
             logger.warning("FIRECRAWL_API_KEY not set. Cannot use FireCrawl for extraction.")

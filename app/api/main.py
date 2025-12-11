@@ -32,4 +32,3 @@ async def health_check():
         "version": config.VERSION
     }
 
-    

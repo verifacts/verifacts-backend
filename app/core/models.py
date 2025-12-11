@@ -44,3 +44,10 @@ class Claim(BaseModel):
     confidence: Optional[float] = Field(None, description="Confidence score of claim extraction (0.0 to 1.0).")
     claim_type: Literal["factual", "opinion", "mixed", "ambiguous"] = Field(..., description="Type of the claim.")
     
+class CredibilityVerdict(BaseModel):
+    trust_level: str = Field(..., description="Overall trust level of the source (e.g., high, medium, low).")
+    score: float = Field(..., description="Credibility score of the source (0-100).")
+    red_flags: List[str] = Field(..., description="List of identified red flags affecting credibility.")
+    summary: str = Field(..., description="Summary of the credibility assessment.")
+    source_used: list[str] = Field(..., description="List of sources used in the credibility assessment.")
+    
