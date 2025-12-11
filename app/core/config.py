@@ -18,15 +18,11 @@ class Config(BaseSettings):
     SECRET_KEY: str = os.getenv("SECRET_KEY", "default_secret_key")
     
     GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
-    # FIRECRAWL_API_KEY: Optional[str] = os.getenv("FIRECRAWL_API_KEY")
-    GOOGLE_APIS_KEY: Optional[str] = os.getenv("GOOGLE_APIS_KEY")
-    LLM_MODEL_NAME: str = os.getenv("LLM_MODEL_NAME", "gemini-2.5-pro")
-    LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
+    LLM_MODEL_NAME: str = os.getenv("LLM_MODEL_NAME", "gemini-2.5-flash")
+    LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0"))
     LLM_MAX_TOKEN: int = int(os.getenv("LLM_MAX_TOKEN", "1024"))
     FIRECRAWL_API_KEY: Optional[str] = os.getenv("FIRECRAWL_API_KEY")
-    GOOGLE_FACTS_CHECK_API_KEY: Optional[str] = os.getenv("GOOGLE_FACTS_CHECK_API_KEY")
-    SERPER_API_KEY: Optional[str] = os.getenv("SERPER_API_KEY")
-    
+    URLSCAN_API_KEY: Optional[str] = os.getenv("URLSCAN_API_KEY")
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     
     model_config = SettingsConfigDict(
