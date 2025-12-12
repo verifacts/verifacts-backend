@@ -39,20 +39,16 @@ class ClaimExtractionAgent:
         self.tools = ClaimTools()
         
     
-    async def run(self, url: str, selection: Optional[str] = None) -> List[Claim]:
+    async def run(self, verdict:Optional[Dict] = None) -> List[Claim]:
         """
         Main method to run the Claim Extraction Agent.
-        
-        Args:
-            url (str): The URL of the webpage to analyze.
-            selection (Optional[str]): Optional specific text selection from the webpage.
-            
-        Returns:
-            List[Claim]: A list of extracted Claim objects.
         """
         text_to_process = ""
         source_type = "selection"
-        context_url = url
+        context_url = verdict.get("url") if verdict else None
+        selection = verdict.get("selection") if verdict else None
+        url = context_url
+        cleaned_bg = ""  # Initialize here to avoid 'not defined' errors
         
         if selection:
             logger.info("Using user-provided text selection for claim extraction.")
@@ -80,18 +76,13 @@ class ClaimExtractionAgent:
         elif url:
             logger.info(f"No text selection provided, scraping article text from {url}.")
             
-            scraped_text =await self.tools.scrape_article_text.ainvoke(url)
+            scraped_text = await self.tools.scrape_article_text.ainvoke(url)
             
             if not scraped_text:
                 logger.warning("No text could be extracted from the article.")
                 return [self._create_ambiguous_claim("No text could be extracted from the article.", url, "extracted")]
             
-            clean_text, truncated = self.tools.sanitize_text(scraped_text, max_length=10000)
-            if truncated:
-                logger.warning("Extracted text was truncated due to length constraints.")
-                
-            text_to_process = clean_text[:4000]
-            
+            text_to_process = scraped_text
             source_type = "extracted"
             
         if not text_to_process:
@@ -102,27 +93,31 @@ class ClaimExtractionAgent:
         is_short_selection = len(text_to_process.split()) < 50
         has_complexity = " and " in text_to_process.lower() or ";" in text_to_process or "," in text_to_process
         
-        
-        should_atomize = (source_type == "extracted") or has_complexity and (cleaned_bg != "")
+        should_atomize = (source_type == "extracted") or (has_complexity and cleaned_bg != "")
         
         if should_atomize and self.llm:
-            return await self._atomize_and_extract_claims(text_to_process, url, source_type, cleaned_bg if 'cleaned_bg' in locals() else "")
+            # Fixed: Correct argument order matching method signature
+            return await self._atomize_and_extract_claims(
+                text=text_to_process,
+                url=url,
+                source=source_type,  # This is the source type (selection/extracted)
+                source_type=source_type,
+                context=cleaned_bg
+            )
         else:
-            return [self._passthrough_claim(text_to_process, url, source_type)]
+            return [self._create_ambiguous_claim(text_to_process, url, source_type)]
         
 
-    async def _atomize_and_extract_claims(self, text: str, url: Optional[str], source:str, source_type: str, context: str) -> List[Claim]:
+    async def _atomize_and_extract_claims(
+        self, 
+        text: str, 
+        url: Optional[str], 
+        source: str, 
+        source_type: str, 
+        context: Optional[str] = None
+    ) -> List[Claim]:
         """
         Atomizes the text into multiple claims using the LLM.
-        Args:
-            text (str): The text to atomize and extract claims from.
-            url (Optional[str]): The URL of the source webpage.
-            source (str): The original source text.
-            source_type (str): The type of the source (selection, extracted, etc.).
-            context (str): Additional context to provide to the LLM.
-            
-        Returns:
-            List[Claim]: A list of extracted Claim objects.
         """
         
         context_instruction = ""
@@ -130,7 +125,7 @@ class ClaimExtractionAgent:
         if source == "selection" and context:
             context_instruction = (
                 f"CONTEXT INFO:\n"
-               f"The user selected the text below from a webpage ({url or 'unknown'}).\n"
+                f"The user selected the text below from a webpage ({url or 'unknown'}).\n"
                 f"Here is a snippet of the page content to help you understand the topic:\n"
                 f"--- BEGIN CONTEXT ---\n{context}\n--- END CONTEXT ---\n"
                 f"Use this context to resolve ambiguities (e.g. what 'it' refers to), but ONLY extract claims from the 'USER SELECTION'."
@@ -154,7 +149,7 @@ class ClaimExtractionAgent:
             ("user", "USER SELECTION to analyze:\n{text}")
         ])
         
-        chain = prompt | self.llm | self.parser
+        chain = prompt | self.llm | self.output_parser
         
         try: 
             result = await chain.ainvoke({
@@ -162,42 +157,67 @@ class ClaimExtractionAgent:
                 "context_instruction": context_instruction,
                 "format_instructions": self.output_parser.get_format_instructions()
             })
+            logger.info(f"Successfully extracted claims using atomization {result}.")
             
             claims = []
-            for item in result.get("claims", []):
-                claim_text = item.get("text") if isinstance(item, dict) else str(item)
+            
+            # Handle both dict and list responses from the parser
+            claims_list = result.get("claims", []) if isinstance(result, dict) else result
+            
+            for item in claims_list:
+                if isinstance(item, dict):
+                    claim_text = item.get("text", str(item))
+                    claim_type = item.get("type", "factual")
+                else:
+                    claim_text = str(item)
+                    claim_type = "factual"
                 
                 claims.append(Claim(
                     claim_id=str(uuid.uuid4()),
                     text=claim_text,
                     normalized_text=claim_text.lower().strip(),
-                    claim_type=item.get("type", "factual"),
+                    claim_type=claim_type,
                     provenance=Provenance(
                         source=source_type,
                         url=url,
-                        context= context_instruction[:200] + "..." if context_instruction else None,
+                        context=context_instruction[:200] + "..." if context_instruction else None,
                     ),
-                    confidence= 0.9 if item.get("type") == "factual" else 0.6
+                    confidence=0.9 if claim_type == "factual" else 0.6
                 ))
             logger.info(f"Extracted {len(claims)} claims using atomization.")
             return claims
         
         except Exception as e:
             logger.error(f"Error during claim atomization and extraction: {str(e)}")
-            return [self._create_ambiguous_claim("Error during claim extraction.", url, source_type)]
+            # Ensure source_type has a valid value for Provenance
+            valid_source_type = source_type if source_type in ("selection", "extracted", "user_provided") else "extracted"
+            return [self._create_ambiguous_claim("Error during claim extraction.", url, valid_source_type)]
         
     def _create_ambiguous_claim(self, text: str, url: Optional[str], source_type: str) -> Claim:
         """Fallback to create an ambiguous claim when extraction fails."""
+        # Ensure source_type has a valid value
+        valid_source_type = source_type if source_type in ("selection", "extracted", "user_provided") else "extracted"
         return Claim(
             claim_id=str(uuid.uuid4()),
             text=text,
             normalized_text=text.lower().strip(),
             claim_type="ambiguous",
             provenance=Provenance(
-                source=source_type,
+                source=valid_source_type,
                 url=url,
                 context=text[:100] + "..." if text else None
             ),
             confidence=0.0
         )
-    
+
+# Example Usage:
+async def main():
+    verdict = {'url': 'https://databackedafrica.com/', 'trust_level': 'medium-high', 'score': 80, 'red_flags': ['Brand new TLS certificate (3 days'], 'summary': None, 'source_used': ['https://databackedafrica.com/']}
+    agent = ClaimExtractionAgent()
+    claims = await agent.run(verdict)
+    for claim in claims:
+        print(f"Claim ID: {claim.claim_id}, Text: {claim.text}, Type: {claim.claim_type}, Confidence: {claim.confidence}")
+        
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
