@@ -1,10 +1,5 @@
-import whois 
-import tldextract
 import aiohttp
-import datetime
-import re 
 import asyncio
-from urllib.parse import urlparse
 from typing import Optional, Dict, Any
 import os
 from dotenv import load_dotenv
