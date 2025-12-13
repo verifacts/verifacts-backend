@@ -39,13 +39,15 @@ class ClaimExtractionAgent:
         self.tools = ClaimTools()
         
     
-    async def run(self, url: str, selection: Optional[str] = None) -> List[Claim]:
+    async def run(self, verdict:Optional[Dict] = None) -> List[Claim]:
         """
         Main method to run the Claim Extraction Agent.
         """
         text_to_process = ""
         source_type = "selection"
-        context_url = url
+        context_url = verdict.get("url") if verdict else None
+        selection = verdict.get("selection") if verdict else None
+        url = context_url
         cleaned_bg = ""  # Initialize here to avoid 'not defined' errors
         
         if selection:
@@ -210,10 +212,9 @@ class ClaimExtractionAgent:
 
 # Example Usage:
 async def main():
-    url = "https://www.nbcnews.com/politics/donald-trump/trump-cnn-warner-bros-discovery-netflix-paramount-rcna248518/"
-    selection = None  # or some specific text selection
+    verdict = {'url': 'https://databackedafrica.com/', 'trust_level': 'medium-high', 'score': 80, 'red_flags': ['Brand new TLS certificate (3 days'], 'summary': None, 'source_used': ['https://databackedafrica.com/']}
     agent = ClaimExtractionAgent()
-    claims = await agent.run(url, selection)
+    claims = await agent.run(verdict)
     for claim in claims:
         print(f"Claim ID: {claim.claim_id}, Text: {claim.text}, Type: {claim.claim_type}, Confidence: {claim.confidence}")
         

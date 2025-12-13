@@ -97,13 +97,13 @@ class SourceCredibilityAgent:
                 "source_used": [url]
             }
             
-# Example usage:
-async def main():
-    url = "https://databackedafrica.com/"
-    agent = SourceCredibilityAgent()
-    verdict = await agent.run(url)
-    print(f"Credibility Verdict: {verdict}")
+# # Example usage:
+# async def main():
+#     url = "https://databackedafrica.com/"
+#     agent = SourceCredibilityAgent()
+#     verdict = await agent.run(url)
+#     print(f"Credibility Verdict: {verdict}")
     
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+# if __name__ == "__main__":
+#     import asyncio
+#     asyncio.run(main())
