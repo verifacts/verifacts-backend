@@ -2,9 +2,7 @@ import logging
 import asyncio
 from typing import Dict, TypedDict, Annotated, List
 
-from langchain_core.runnables import Runnable
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver  # For state persistence
 from redis import Redis  # pip install redis
 from langchain_community.cache import RedisCache
 
@@ -27,7 +25,7 @@ class WorkflowState(TypedDict):
     url: str
     selection: str
     credibility: Annotated[Dict, "Source credibility report"]
-    claims: Annotated[List[Dict], "Extracted claims"]
+    claims: Annotated[List[str], "Extracted claims"]
     fact_checks: Annotated[List[Dict], "Fact check verdicts"]
     search_insights: Annotated[List[Dict], "Tavily search results with snippets for enrichment"]
     error: Annotated[str, "Error message, if any"]
@@ -95,7 +93,8 @@ async def search_enrichment_node(state: WorkflowState) -> WorkflowState:
     for claim in state["claims"]:
         try:
             query = f"fact check: {claim} site:reputable"
-            results = await tavily_search.ainvoke({"query": query})
+            results = await tavily_search.ainvoke({"query": query, "max_results": 3})
+            logger.info(f"Tavily results for claim '{claim}': {results}")
             insights.append({
                 "claim": claim,
                 "results": results,  # Includes snippets, answers, sources
@@ -111,21 +110,48 @@ async def search_enrichment_node(state: WorkflowState) -> WorkflowState:
 async def compile_report_node(state: WorkflowState) -> WorkflowState:
     # LLM summarizes overall
     prompt = ChatPromptTemplate.from_template("""
-    Based on this state, generate final verdict and summary:
-    State: {state_json}
+You are a fact-check report compiler. Analyze the following state and generate a final report.
 
-    Overall verdict: Most claims verified → verified; most debunked → debunked; mixed → mixture
-    """)
-    output_parser = JsonOutputParser(pydantic_object=FinalReport)
+State:
+- URL: {url}
+- Source Credibility: {credibility}
+- Claims Extracted: {claims}
+- Fact Check Results: {fact_checks}
+- Search Insights: {search_insights}
+
+Rules for verdict:
+- If most claims are verified → "verified"
+- If most claims are debunked → "debunked"  
+- If mixed results → "mixture"
+- If insufficient evidence → "unverified"
+
+{format_instructions}
+
+Respond ONLY with valid JSON. Do not include any markdown formatting, explanations, or text outside the JSON object.
+""")
     llm = llm_wrapper.get_llm()
+    output_parser = JsonOutputParser(pydantic_object=FinalReport)
     chain = prompt | llm | output_parser
+    
     try:
-        compiled = await chain.ainvoke({"state_json": str(state)})
+        compiled = await chain.ainvoke({
+            "url": state.get("url", ""),
+            "credibility": state.get("credibility", {}),
+            "claims": state.get("claims", []),
+            "fact_checks": state.get("fact_checks", []),
+            "search_insights": state.get("search_insights", []),
+            "format_instructions": output_parser.get_format_instructions()
+        })
+        logger.info(f"Compiled report: {compiled}")
         state["overall_verdict"] = compiled.get("overall_verdict", "unverified")
         state["summary"] = compiled.get("summary", "No summary generated")
         state["sources"] = [s for insight in state.get("search_insights", []) for s in insight["sources"]]
     except Exception as e:
-        state["error"] = f"Report compilation failed: {e}"
+        logger.error(f"Report compilation error: {str(e)}")
+        # Fallback: Create a basic report without LLM
+        state["overall_verdict"] = "unverified"
+        state["summary"] = f"Report compilation failed. {len(state.get('claims', []))} claims extracted, {len(state.get('fact_checks', []))} fact-checks completed."
+        state["sources"] = [s for insight in state.get("search_insights", []) for s in insight.get("sources", [])]
     return state
 
 def decide_next_step(state: WorkflowState) -> str:
@@ -137,7 +163,6 @@ def decide_next_step(state: WorkflowState) -> str:
 # === Orchestrator ===
 workflow = StateGraph(state_schema=WorkflowState)
 
-
 workflow.add_node("credibility_node", credibility_node)
 workflow.add_node("extraction_node", extraction_node)
 workflow.add_node("search_enrichment_node", search_enrichment_node)
@@ -147,7 +172,12 @@ workflow.add_node("compile_report_node", compile_report_node)
 workflow.set_entry_point("credibility_node")
 
 workflow.add_conditional_edges(
-    "credibility_node", decide_next_step
+    "credibility_node",
+    decide_next_step,
+    {
+        "extraction_node": "extraction_node",
+        END: END
+    }  # Fixed: Added mapping dict
 )
 workflow.add_edge("extraction_node", "search_enrichment_node")
 workflow.add_edge("search_enrichment_node", "factcheck_node")
@@ -159,17 +189,29 @@ memory = MemorySaver()
 graph = workflow.compile(checkpointer=memory)
 
 
-async def run_orchestrator(url: str, selection:str) -> WorkflowState:
+async def run_orchestrator(url: str, selection: str) -> FinalReport:
     initial_state: WorkflowState = {
         "url": url,
         "selection": selection,
         "credibility": {},
         "claims": [],
         "fact_checks": [],
-        "error": "",
+        "search_insights": [],
+        "error": None,
     }
     final_state = await graph.ainvoke(initial_state, config={"configurable": {"thread_id": "main"}})
-    return final_state
+    
+    # Return as FinalReport (with defaults for missing fields)
+    return FinalReport(
+        url=final_state.get("url", ""),
+        credibility=final_state.get("credibility", {}),
+        claims=final_state.get("claims", []),
+        fact_checks=final_state.get("fact_checks", []),
+        search_insights=final_state.get("search_insights", []),
+        overall_verdict=final_state.get("overall_verdict", "unverified"),
+        summary=str(final_state.get("summary", "No summary available")),
+        sources=final_state.get("sources", [])
+    )
 
 # Example usage
 if __name__ == "__main__":
@@ -177,7 +219,4 @@ if __name__ == "__main__":
     test_selection = "Paramount initiated a hostile bid, offering shareholders $30 per share."
     
     result_state = asyncio.run(run_orchestrator(test_url, test_selection))
-    if result_state.get("error"):
-        logger.error(f"Orchestration failed: {result_state['error']}")
-    else:
-        logger.info(f"Orchestration completed successfully. Fact-checks: {result_state['fact_checks']}")
+    logger.info(f"Final Verdict: {result_state.overall_verdict}")

@@ -1,6 +1,8 @@
+# app/api/v1/endpoints.py
 import logging
-from fastapi import APIRouter, HTTPException, Depends
-from app.core.models import AnalysisRequest, AnalysisResponse, IdentityData, VerdictData
+from fastapi import APIRouter, HTTPException
+from app.orchestrator import run_orchestrator
+from app.core.models import AnalysisRequest, AnalysisResponse, SourceIdentity, VerdictSummary, ClaimVerdict
 from app.core.config import config
 
 logger = logging.getLogger(__name__)
@@ -11,56 +13,84 @@ router = APIRouter(prefix=config.API_PREFIX, tags=["v1"])
 @router.post("/analyze", response_model=AnalysisResponse)
 async def analyze_content(request: AnalysisRequest) -> AnalysisResponse:
     """
-    Core v1 endpoint to analyze and verify the sources of web contents.
-    Triggers the analysis pipeline and multi-agent Langgraph workflow.
+    Main endpoint: Analyze a URL and optional text selection.
+    Runs the full multi-agent LangGraph pipeline.
     """
-    try:
-        initial_state = {
-            "url": str(request.url),
-            "selection": request.selection,
-            "force_refresh": request.force_refresh,
-            "claims": [],
-            "errors": [],
-            "verification_results": [],
-            "extracted_claims": [],
-            "agent_reports": [],
-        }
-        logger.info(f"Starting analysis for URL: {request.url}")
-        
-        final_state = initial_state
-        
-        identity_data = IdentityData(
-            verified=final_state.get("is_verified", False),
-            score=final_state.get("credibility_score", 0.0),
-        )
-        verdict_data = VerdictData(
-            status=final_state.get("verdict_status", "Unverified"),
-            claims_counted=final_state.get("claims_counted", 0),
-            claims_verified=final_state.get("claims_verified", 0),
-            claims_sourced=final_state.get("claims_sourced", 0)
-        )
-        
-        agent_reports = final_state.get("agent_reports", [])
-        formatted_reports = [
-            {
-                "agent": report.get("agent_name", "unknown"),
-                "claims": report.get("output", []),
-                "errors": report.get("errors", [])
-            }
-            for report in agent_reports
-        ]
+    logger.info(f"Received analysis request for URL: {request.url}")
 
-        response = AnalysisResponse(
-            status=final_state.get("status", "Completed"),
-            verdict=verdict_data,
-            details={
-                "reports": formatted_reports,
-                "raw_claims": final_state.get("verification_results", [])
-            },
-            identity=identity_data
+    try:
+        # Run the full orchestrator
+        result = await run_orchestrator(
+            url=str(request.url),
+            selection=request.selection or ""
         )
-        return response
-    
+
+        # Extract data safely
+        credibility = result.credibility
+        claims_raw = result.claims
+        fact_checks = result.fact_checks
+        search_insights = result.search_insights
+
+        # Build claim verdicts
+        claim_verdicts = []
+        verified_count = 0
+        debunked_count = 0
+
+        for i, claim_text in enumerate(claims_raw):
+            check = fact_checks[i] if i < len(fact_checks) else {}
+            verdict_data = check.get("verdict", {})
+            
+            verdict = verdict_data.get("verdict", "unverified")
+            if verdict == "verified":
+                verified_count += 1
+            elif verdict == "debunked":
+                debunked_count += 1
+
+            claim_verdicts.append(ClaimVerdict(
+                claim=claim_text,
+                verdict=verdict,
+                confidence=verdict_data.get("confidence"),
+                explanation=verdict_data.get("explanation"),
+                sources=verdict_data.get("sources", [])
+            ))
+
+        # Overall verdict logic
+        total = len(claims_raw)
+        if total == 0:
+            overall = "no_claims"
+        elif verified_count == total:
+            overall = "verified"
+        elif debunked_count == total:
+            overall = "debunked"
+        elif verified_count > debunked_count:
+            overall = "mostly_verified"
+        elif debunked_count > verified_count:
+            overall = "mostly_debunked"
+        else:
+            overall = "mixture"
+
+        return AnalysisResponse(
+            source_identity=SourceIdentity(
+                trust_level=credibility.get("trust_level", "unknown"),
+                score=credibility.get("score", 50.0),
+                red_flags=credibility.get("red_flags", []),
+                summary=credibility.get("summary")
+            ),
+            claims=claim_verdicts,
+            verdict=VerdictSummary(
+                overall_verdict=overall,
+                summary=result.summary,
+                total_claims=total,
+                verified_count=verified_count,
+                debunked_count=debunked_count,
+                sources=result.sources
+            ),
+            search_insights=search_insights
+        )
+
     except Exception as e:
-        logger.error(f"Error during analysis: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Analysis of web content failed {str(e)}")
+        logger.error(f"Analysis failed: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Analysis failed: {str(e)}"
+        )
