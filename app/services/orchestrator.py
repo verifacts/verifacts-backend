@@ -9,8 +9,8 @@ from langchain_community.cache import RedisCache
 from app.services.identify.agent import SourceCredibilityAgent
 from app.services.claims.agent import ClaimExtractionAgent
 from app.services.fact_checker.agent import FactCheckAgent
+from app.services.search_enrichment.agent import TavilySearchAgent
 from app.core.config import config
-from app.services.shared_tools import tavily_search
 from app.services.llm_wrapper import llm_wrapper
 from langchain_core.prompts import ChatPromptTemplate
 from app.core.models import FinalReport
@@ -85,23 +85,33 @@ async def factcheck_node(state: WorkflowState) -> WorkflowState:
         state["error"] = f"Fact-checking failed: {str(e)}"
     return state
 
-# === NEW: Tavily Enrichment (Always runs after extraction) ===
+# === NEW: Search Enrichment with LLM Reasoning ===
 async def search_enrichment_node(state: WorkflowState) -> WorkflowState:
-    if state.get("error") or not state.get("claims"): return state
+    if state.get("error") or not state.get("claims"):
+        state["search_insights"] = []
+        return state
 
+    if not config.TAVILY_API_KEY:
+        logger.warning("Tavily not configured — skipping search enrichment")
+        state["search_insights"] = []
+        return state
+
+    agent = TavilySearchAgent()
     insights = []
+
     for claim in state["claims"]:
         try:
-            query = f"fact check: {claim} site:reputable"
-            results = await tavily_search.ainvoke({"query": query, "max_results": 3})
-            logger.info(f"Tavily results for claim '{claim}': {results}")
+            result = await agent.run(claim)
+            insights.append(result)
+            logger.info(f"Successfully ran Tavily Search enrichment for claim '{claim[:30]}...': {result}")
+        except Exception as e:
+            logger.error(f"Search enrichment failed for '{claim}': {e}")
             insights.append({
                 "claim": claim,
-                "results": results,  # Includes snippets, answers, sources
-                "sources": [r["url"] for r in results]
+                "status": "failed",
+                "error": str(e),
+                "insights": None
             })
-        except Exception as e:
-            logger.warning(f"Tavily failed for claim '{claim}': {e}")
 
     state["search_insights"] = insights
     return state
@@ -145,15 +155,72 @@ Respond ONLY with valid JSON. Do not include any markdown formatting, explanatio
         logger.info(f"Compiled report: {compiled}")
         state["overall_verdict"] = compiled.get("overall_verdict", "unverified")
         state["summary"] = compiled.get("summary", "No summary generated")
-        state["sources"] = [s for insight in state.get("search_insights", []) for s in insight["sources"]]
+        
     except Exception as e:
-        logger.error(f"Report compilation error: {str(e)}")
-        # Fallback: Create a basic report without LLM
-        state["overall_verdict"] = "unverified"
-        state["summary"] = f"Report compilation failed. {len(state.get('claims', []))} claims extracted, {len(state.get('fact_checks', []))} fact-checks completed."
-        state["sources"] = [s for insight in state.get("search_insights", []) for s in insight.get("sources", [])]
-    return state
+        logger.error(f"LLM report compilation failed: {str(e)}")
+        # Fallback summary
+        total_claims = len(state.get("claims", []))
+        verified = sum(1 for fc in state.get("fact_checks", []) if fc.get("verdict", {}).get("verdict") == "verified")
+        debunked = sum(1 for fc in state.get("fact_checks", []) if fc.get("verdict", {}).get("verdict") == "debunked")
 
+        if total_claims == 0:
+            verdict = "no_claims"
+        elif verified == total_claims:
+            verdict = "verified"
+        elif debunked == total_claims:
+            verdict = "debunked"
+        elif verified > debunked:
+            verdict = "mostly_verified"
+        elif debunked > verified:
+            verdict = "mostly_debunked"
+        else:
+            verdict = "mixture"
+
+        state["overall_verdict"] = verdict
+        state["summary"] = (
+            f"Processed {total_claims} claims. "
+            f"{verified} verified, {debunked} debunked. "
+            "Web search provided additional context."
+        )
+    
+    # === Extract ALL sources from both fact-checks AND Tavily insights ===
+    sources_set = set()  # Deduplicate URLs
+
+    # 1. From Google Fact Check (fact_checks)
+    for fc in state.get("fact_checks", []):
+        verdict_data = fc.get("verdict", {})
+        source_url = verdict_data.get("source_url") or verdict_data.get("corroboration_url")
+        if source_url:
+            sources_set.add(source_url.strip())
+
+    # 2. From TavilySearchAgent (search_insights)
+    for insight in state.get("search_insights", []):
+        if insight.get("status") != "success":
+            continue
+        insights_data = insight.get("insights", {})
+        if not insights_data:
+            continue
+
+        # Prefer LLM-selected key_sources
+        key_sources = insights_data.get("key_sources", [])
+        for src in key_sources:
+            url = src.get("url")
+            if url:
+                sources_set.add(url.strip())
+
+        # Fallback: use raw top_sources if key_sources empty
+        if not key_sources:
+            raw = insights_data.get("raw_search", {})
+            for src in raw.get("top_sources", []):
+                url = src.get("url")
+                if url:
+                    sources_set.add(url.strip())
+
+    state["sources"] = list(sources_set)  # Convert back to list
+
+    logger.info(f"Compiled {len(state['sources'])} unique sources")
+        
+    
 def decide_next_step(state: WorkflowState) -> str:
     cred = state.get("credibility", {}).get("verdict", {}).get("trust_level", "unknown")
     if cred in ["low", "very_low"]:
