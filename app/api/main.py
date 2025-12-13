@@ -21,16 +21,15 @@ app.add_middleware(
 app.include_router(v1_router)
 
 
-app.get("/")
+@app.get("/")
 async def root():
     return {"message": "Welcome to the Verifacts Backend API!"}
 
 
-app.get("/health")
+@app.get("/health")
 async def health_check():
     return {
         "status": "operational",
         "message": "The Verifacts Backend API is running smoothly.",
         "version": config.VERSION
     }
-
