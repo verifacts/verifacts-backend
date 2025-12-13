@@ -50,21 +50,25 @@ async def analyze_content(request: AnalysisRequest) -> AnalysisResponse:
                 fact_check_map[fc["verdict"]["claim"]] = fc["verdict"]
 
         for claim_text in claims_raw:
-            # Primary: Use search_insights (LLM-enriched)
             insight_data = search_map.get(claim_text, {})
 
             if insight_data:
                 verdict = insight_data.get("verdict", "unverified")
                 confidence = insight_data.get("confidence")
                 explanation = insight_data.get("llm_summary") or insight_data.get("summary")
-                sources = insight_data.get("key_sources", [])
+                # ← FIXED: Only URLs
+                sources = [
+                    src["url"] 
+                    for src in insight_data.get("key_sources", []) 
+                    if isinstance(src, dict) and src.get("url")
+                ]
             else:
-                # Fallback: Use Google Fact Check
                 fc_verdict = fact_check_map.get(claim_text, {})
                 verdict = fc_verdict.get("verdict", "unverified")
-                confidence = None  # Fact check doesn't provide confidence
+                confidence = None
                 explanation = fc_verdict.get("textual_rating") or "No fact-check available"
                 sources = [fc_verdict.get("source_url")] if fc_verdict.get("source_url") else []
+
 
             # Count for stats
             if verdict == "verified":
