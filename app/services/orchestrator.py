@@ -28,6 +28,8 @@ class WorkflowState(TypedDict):
     claims: Annotated[List[str], "Extracted claims"]
     fact_checks: Annotated[List[Dict], "Fact check verdicts"]
     search_insights: Annotated[List[Dict], "Tavily search results with snippets for enrichment"]
+    overall_verdict: Annotated[str, "Overall verdict of the analysis"]
+    sources: Annotated[List[str], "All source URLs used in the analysis"]
     error: Annotated[str, "Error message, if any"]
     
 
@@ -128,8 +130,9 @@ State:
 - Claims Extracted: {claims}
 - Fact Check Results: {fact_checks}
 - Search Insights: {search_insights}
+- Overall Verdict: {overall_verdict}
 
-Rules for verdict:
+Rules for verdict, PRIOROTIZE SENTIMENT FROM SEARCH INSIGHT OVER FACT CHECKER INSIGHTS:
 - If most claims are verified → "verified"
 - If most claims are debunked → "debunked"  
 - If mixed results → "mixture"
@@ -150,6 +153,7 @@ Respond ONLY with valid JSON. Do not include any markdown formatting, explanatio
             "claims": state.get("claims", []),
             "fact_checks": state.get("fact_checks", []),
             "search_insights": state.get("search_insights", []),
+            "overall_verdict": state.get("overall_verdict", "unverified"),
             "format_instructions": output_parser.get_format_instructions()
         })
         logger.info(f"Compiled report: {compiled}")
@@ -218,8 +222,6 @@ Respond ONLY with valid JSON. Do not include any markdown formatting, explanatio
 
     state["sources"] = list(sources_set)  # Convert back to list
 
-    logger.info(f"Compiled {len(state['sources'])} unique sources")
-        
     
 def decide_next_step(state: WorkflowState) -> str:
     cred = state.get("credibility", {}).get("verdict", {}).get("trust_level", "unknown")
@@ -264,6 +266,8 @@ async def run_orchestrator(url: str, selection: str) -> FinalReport:
         "claims": [],
         "fact_checks": [],
         "search_insights": [],
+        "overall_verdict": "unverified",
+        "sources": [],
         "error": None,
     }
     final_state = await graph.ainvoke(initial_state, config={"configurable": {"thread_id": "main"}})
@@ -279,11 +283,3 @@ async def run_orchestrator(url: str, selection: str) -> FinalReport:
         summary=str(final_state.get("summary", "No summary available")),
         sources=final_state.get("sources", [])
     )
-
-# Example usage
-if __name__ == "__main__":
-    test_url = "https://www.nbcnews.com/politics/donald-trump/trump-cnn-warner-bros-discovery-netflix-paramount-rcna248518"
-    test_selection = "Paramount initiated a hostile bid, offering shareholders $30 per share."
-    
-    result_state = asyncio.run(run_orchestrator(test_url, test_selection))
-    logger.info(f"Final Verdict: {result_state.overall_verdict}")

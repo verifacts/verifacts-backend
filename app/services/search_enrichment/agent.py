@@ -17,7 +17,7 @@ class SearchEnrichmentVerdict(BaseModel):
     claim: str = Field(..., description="Original claim")
     summary: str = Field(..., description="Clear, neutral 2-3 sentence summary of current reporting")
     confidence: float = Field(..., ge=0, le=1, description="Confidence in the summary (0-1)")
-    sentiment: str = Field(..., description="confirmed | disputed | unverified | emerging")
+    verdict: str = Field(..., description="verified | debunked | mixture | unverified")
     key_sources: List[Dict[str, str]] = Field(..., description="Top 3 most relevant sources with title/url")
     notes: str = Field("", description="Any caveats, contradictions, or context")
 
@@ -103,10 +103,9 @@ Top Sources:
                 "insights": {
                     "llm_summary": llm_output.get("summary"),
                     "confidence": llm_output.get("confidence", 0.5),
-                    "sentiment": llm_output.get("sentiment"),
+                    "verdict": llm_output.get("verdict"),
                     "key_sources": llm_output.get("key_sources", []),
-                    "notes": llm_output.get("notes", ""),
-                    "raw_search": raw_result  # Optional: keep raw for debugging
+                    "notes": llm_output.get("notes", "")
                 }
             }
 
@@ -121,8 +120,7 @@ Top Sources:
                     "confidence": 0.4,
                     "sentiment": raw_result["overall_sentiment"],
                     "key_sources": raw_result["top_sources"][:3],
-                    "notes": "LLM reasoning failed — using raw search summary.",
-                    "raw_search": raw_result
+                    "notes": "LLM reasoning failed — using raw search summary."
                 }
             }
 

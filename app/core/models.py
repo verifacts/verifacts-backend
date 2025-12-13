@@ -41,7 +41,6 @@ class AnalysisResponse(BaseModel):
     claims: List[ClaimVerdict]
     verdict: VerdictSummary
     search_insights: Optional[List[Dict]] = None  # From Tavily
-    raw_orchestrator_state: Optional[Dict] = None  # Debug only, remove in prod
     
     
 class Provenance(BaseModel):

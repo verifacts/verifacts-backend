@@ -1,3 +1,4 @@
+import tldextract
 import aiohttp
 import asyncio
 from typing import Optional, Dict, Any
@@ -187,7 +188,7 @@ class SourceCredibilityTool:
         urlscan_data = None
         if result_url:
             for _ in range(10):  # Retry up to 10 times
-                await asyncio.sleep(5)  # Wait before retrying
+                await asyncio.sleep(10)  # Wait before retrying
                 urlscan_data = await SourceCredibilityTool._fetch_urlscan_result(result_url)
                 if urlscan_data:
                     break
