@@ -1,7 +1,7 @@
 # app/api/v1/endpoints.py
 import logging
 from fastapi import APIRouter, HTTPException
-from app.orchestrator import run_orchestrator
+from app.services.orchestrator import run_orchestrator
 from app.core.models import AnalysisRequest, AnalysisResponse, SourceIdentity, VerdictSummary, ClaimVerdict
 from app.core.config import config
 
