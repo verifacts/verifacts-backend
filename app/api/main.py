@@ -4,13 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.endpoints import router as v1_router
 from app.core.config import config
 
-main = FastAPI(
+app = FastAPI(
     title=config.PROJECT_NAME,
     version=config.VERSION,
     openapi_url=f"{config.API_PREFIX}/openapi.json"
 )
 
-main.add_middleware(
+app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
@@ -18,13 +18,15 @@ main.add_middleware(
     allow_headers=["*"],
 )
 
-main.include_router(v1_router)
+app.include_router(v1_router)
 
-@main.get("/")
+
+app.get("/")
 async def root():
     return {"message": "Welcome to the Verifacts Backend API!"}
 
-@main.get("/health")
+
+app.get("/health")
 async def health_check():
     return {
         "status": "operational",
