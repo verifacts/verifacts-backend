@@ -12,3 +12,9 @@ langchain-core
 langgraph
 langchain-community
 langchain-google-genai
+firecrawl
+tavily-python
+langchain-tavily
+langchain-firecrawl
+python-dotenv
+python-json-logger
