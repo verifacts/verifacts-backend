@@ -18,10 +18,14 @@ async def analyze_content(request: AnalysisRequest) -> AnalysisResponse:
     Falls back to Google Fact Check if needed.
     """
     logger.info(f"Received analysis request for URL: {request.url}")
+    if not request.url and not request.selection:
+        raise HTTPException(status_code=400, detail="Either 'url' or 'selection' must be provided.")
+    
+    logger.info("Starting orchestrator...")
 
     try:
         result = await run_orchestrator(
-            url=str(request.url),
+            url=str(request.url) if request.url else " ",
             selection=request.selection or ""
         )
         logger.info("Orchestrator completed successfully.")
