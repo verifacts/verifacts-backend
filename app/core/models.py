@@ -3,7 +3,7 @@ from typing import Optional, List, Dict, Any, Literal
 
 
 class AnalysisRequest(BaseModel):
-    url: Optional[HttpUrl] = Field(None, description="The URL of the webpage to analyze.")
+    url: HttpUrl = Field(..., description="The URL of the webpage to analyze.")
     selection: Optional[str] = Field(
         None, 
         description="Optional specific text selection from the webpage."

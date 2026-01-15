@@ -25,7 +25,7 @@ async def analyze_content(request: AnalysisRequest) -> AnalysisResponse:
 
     try:
         result = await run_orchestrator(
-            url=str(request.url) if request.url else " ",
+            url=str(request.url) if request.url,
             selection=request.selection or ""
         )
         logger.info("Orchestrator completed successfully.")
